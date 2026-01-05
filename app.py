@@ -1,187 +1,228 @@
 import streamlit as st
+import re
 
-# --- 1. L-BASI 로직 (두뇌) ---
-def analyze_l_basi(products_text, symptom_level):
-    # 1-1. 제품 분류 키워드
-    triggers_keywords = ["레티놀", "비타민C", "아하", "바하", "AHA", "BHA", "필링", "스크럽", "미백", "주름", "고기능", "애시드", "L-AA"]
-    primers_keywords = ["토너", "스킨", "로션", "세라마이드", "장벽", "보습", "수분", "히알루론산", "크림", "에센스"]
-    stabilizers_keywords = ["시카", "진정", "재생", "판테놀", "마데카", "리페어", "오일", "밤", "병풀", "알로에"]
+# ==========================================
+# 1. 핵심 로직 (두뇌)
+# ==========================================
+
+def classify_products(products_text):
+    """
+    입력된 화장품 텍스트를 분석하여 Primer, Trigger, Stabilizer로 분류하는 함수
+    """
+    # 키워드 데이터베이스 (필요시 계속 추가 가능)
+    triggers_keywords = ["레티놀", "비타민C", "아하", "바하", "AHA", "BHA", "필링", "스크럽", "미백", "주름", "고기능", "애시드", "L-AA", "엔자임", "박피"]
+    primers_keywords = ["토너", "스킨", "로션", "세라마이드", "장벽", "보습", "수분", "히알루론산", "크림", "에센스", "부스터", "프라이머"]
+    stabilizers_keywords = ["시카", "진정", "재생", "판테놀", "마데카", "리페어", "오일", "밤", "병풀", "알로에", "쑥", "어성초"]
 
     my_routine = {"Primer": [], "Trigger": [], "Stabilizer": [], "Unknown": []}
     
-    # 1-2. 입력된 텍스트를 줄바꿈 기준으로 나누기
+    # 입력된 텍스트를 줄바꿈 기준으로 나누기
     product_list = [p.strip() for p in products_text.split('\n') if p.strip()]
 
-    # 1-3. 제품 분류 실행
     for product in product_list:
         classified = False
-        # Trigger 분류 우선
+        # 1순위: Trigger (가장 중요하므로 먼저 분류)
         for key in triggers_keywords:
             if key in product:
                 my_routine["Trigger"].append(product)
                 classified = True
                 break
+        # 2순위: Stabilizer
         if not classified:
             for key in stabilizers_keywords:
                 if key in product:
                     my_routine["Stabilizer"].append(product)
                     classified = True
                     break
+        # 3순위: Primer
         if not classified:
             for key in primers_keywords:
                 if key in product:
                     my_routine["Primer"].append(product)
                     classified = True
                     break
+        # 미분류
         if not classified:
             my_routine["Unknown"].append(product)
+            
+    return my_routine
 
-    # 1-4. 5단계 강도에 따른 조언 (핵심 로직 변경!)
-    advice = ""
-    status = "Normal"
+def calculate_status(score, is_procedure):
+    """
+    설문 점수와 시술 여부를 바탕으로 피부 상태(Status)를 판정하는 함수
+    """
+    # 시술 직후면 점수와 상관없이 최소 '경고' 단계 이상
+    if is_procedure == "네":
+        if score >= 10: return "Danger"
+        return "Warning" 
+    
+    # 점수에 따른 상태 판정
+    if score >= 10: return "Danger"
+    elif score >= 6: return "Warning"
+    elif score >= 3: return "Caution"
+    else: return "Normal"
 
-    if symptom_level == 1: # 없음
-        status = "Normal"
-        advice = """
-        ✅ **최적의 상태(Stable)입니다.**
+def get_advice_text(status):
+    """
+    상태에 따른 맞춤형 조언 텍스트 반환
+    """
+    if status == "Normal":
+        return """
+        ✅ **안정(Stable) 단계입니다.**
         
-        피부가 아주 편안하네요! 현재 루틴을 유지하시고, **Trigger(기능성) 제품**을 적극적으로 써서 효과를 보세요.
+        피부 컨디션이 최적입니다! 현재 장벽이 튼튼하게 유지되고 있습니다.
+        **Trigger(기능성) 제품**을 적극적으로 사용하여 피부 개선 효과를 극대화하세요.
         """
+    elif status == "Caution":
+        return """
+        🙂 **주의(Caution)가 필요합니다.**
         
-    elif symptom_level == 2: # 미약함
-        status = "Caution"
-        advice = """
-        🙂 **괜찮은 상태(Acceptable)입니다.**
-        
-        약간 느낌은 있지만 계속 쓸 수 있어요. 단, **Trigger 제품 양을 반으로** 줄이거나, 이틀에 한 번만 쓰세요.
+        피부 장벽이 살짝 약해져 있거나 미세한 자극이 있습니다.
+        **Trigger 제품의 양을 평소의 절반**으로 줄이고, 수분 공급(Primer)에 더 신경 쓰세요.
         """
+    elif status == "Warning":
+        return """
+        ✋ **경고(Warning) 단계입니다. Trigger를 멈추세요.**
         
-    elif symptom_level == 3: # 거슬림 -> 여기서부터 Trigger 중단!
-        status = "Warning"
-        advice = """
-        ✋ **주의(Caution) 단계입니다. Trigger를 멈추세요.**
-        
-        불편한 게 신경 쓰이기 시작했네요. 욕심내지 마세요.
-        **Trigger(기능성) 사용을 멈추고**, Primer(장벽) 바르는 것에만 집중하세요.
+        피부가 자극 신호를 보내고 있습니다. 욕심내지 마세요.
+        **모든 Trigger(기능성) 사용을 일시 중단**하고, 장벽 복구(Primer)에만 집중할 때입니다.
         """
+    elif status == "Danger":
+        return """
+        🚨 **위험(Danger) 단계입니다.**
         
-    elif symptom_level == 4: # 심함
-        status = "Danger"
-        advice = """
-        🚨 **위험(Danger) 단계입니다. 즉시 중단하세요!**
-        
-        피부 장벽이 다쳤습니다. 
-        모든 기능성 제품을 끊고, 순한 세안제와 **진정 크림(Stabilizer)**만 쓰세요.
+        피부 방어선이 무너졌습니다. 지금 기능성 제품을 바르는 건 피부를 공격하는 것입니다.
+        모든 화장품을 끊고, **순한 세안제와 진정 크림(Stabilizer)**만 사용하세요. 필요시 피부과 방문을 권장합니다.
         """
-        
-    elif symptom_level == 5: # 매우 심함
-        status = "Medical"
-        advice = """
-        🏥 **병원에 가야 할 상태(Medical)입니다.**
-        
-        화장품으로 해결할 수 없습니다.
-        아무것도 바르지 말고 **피부과 의사 선생님**을 만나보세요.
-        """
+    return ""
 
-    return my_routine, status, advice
+def extract_score(text):
+    """
+    선택지 텍스트에서 점수만 쏙 뽑아내는 함수 (예: '아프다 (5점)' -> 5)
+    """
+    match = re.search(r'\((\d+)점\)', text)
+    return int(match.group(1)) if match else 0
 
-# --- 2. 웹사이트 화면 꾸미기 ---
+
+# ==========================================
+# 2. 웹사이트 화면 구성 (Streamlit)
+# ==========================================
+
 st.set_page_config(page_title="L-BASI Skin OS", page_icon="🧬")
 
+# 타이틀
 st.title("🧬 L-BASI™ Skin OS")
-st.markdown("### 화장품 사용 순서 최적화 가이드 (v2.0)")
-st.info("💡 5단계 자가 진단을 통해 '지금 발라도 되는지'를 판단해 드립니다.")
+st.markdown("### 피부 상태 기반 화장품 루틴 설계 시스템")
+st.info("💡 L-BASI는 제품을 추천하는 것이 아니라, 당신의 피부가 **'지금 받아들일 수 있는지'** 판단합니다.")
 
 st.divider()
 
-# [질문 1] 5단계 증상 선택 (라디오 버튼으로 변경!)
-st.subheader("1. 현재 피부 상태를 골라주세요")
-st.caption("가장 비슷한 문장을 하나만 선택하세요.")
+# --- [STEP 1] 정밀 진단 설문 ---
+st.subheader("STEP 1. 정밀 피부 진단 (설문)")
+st.caption("현재 피부 상태를 솔직하게 체크해주세요.")
 
-symptom_options = [
-    (1, "😄 1단계: 없음 (아주 편안해요)"),
-    (2, "🙂 2단계: 미약함 (바를 때만 살짝 따끔하고 금방 사라져요)"),
-    (3, "😐 3단계: 거슬림 (화끈거림이나 붉은 기가 10분 이상 가요)"),
-    (4, "😣 4단계: 심함 (참기 힘들 정도로 따갑거나 아파요)"),
-    (5, "😱 5단계: 매우 심함 (진물이 나거나 심하게 부어올랐어요)")
-]
+with st.expander("📋 진단 설문지 열기 (클릭)", expanded=True):
+    q1 = st.radio("Q1. 화장품을 바를 때 느낌은?", 
+                  ["편안하다 (0점)", "가끔 따끔하다 (1점)", "1분 이상 화끈거린다 (3점)", "바르자마자 아프다 (5점)"], index=0)
+    
+    q2 = st.radio("Q2. 붉은기 상태는?", 
+                  ["없다 (0점)", "금방 가라앉는다 (1점)", "항상 붉고 열감 (3점)", "전체적으로 심함 (5점)"], index=0)
+    
+    q3 = st.radio("Q3. 세안 후 당김은?", 
+                  ["없음/약함 (0점)", "부분적 속당김 (1점)", "찢어질 듯 심함 (2점)"], index=0)
+    
+    q4 = st.radio("Q4. 각질/피부결 상태는?", 
+                  ["매끄러움 (0점)", "거칠거칠함 (1점)", "하얀 각질이 일어남 (2점)"], index=0)
+    
+    q5 = st.radio("Q5. 현재 트러블(여드름)은?", 
+                  ["없다 (0점)", "1~2개 (1점)", "5개 이상/화농성 (3점)"], index=0)
+    
+    q6 = st.radio("Q6. 가려움증이 있나요?", 
+                  ["없다 (0점)", "가끔 간질 (1점)", "계속 긁고 싶음 (3점)"], index=0)
+    
+    st.markdown("---")
+    q7 = st.radio("Q7. 최근 3일 내 피부과 시술(레이저, 필링 등)을 받았나요?", ["아니오", "네"], index=0)
 
-# 사용자가 선택한 옵션 저장
-selected_option = st.radio(
-    "증상 강도:",
-    symptom_options,
-    format_func=lambda x: x[1] # 화면에는 글자만 보여줌
-)
-selected_level = selected_option[0] # 선택된 숫자 (1~5)
+# 점수 합산 로직
+total_score = sum([extract_score(q) for q in [q1, q2, q3, q4, q5, q6]])
+is_procedure = q7
 
-# [질문 2] 화장품 목록 입력
+# --- [STEP 2] 화장품 입력 ---
 st.divider()
-st.subheader("2. 가지고 있는 기초 화장품 이름을 적어주세요")
-st.caption("제품명을 한 줄에 하나씩 입력하세요. (예: 이니스프리 레티놀 앰플)")
-products_input = st.text_area("화장품 목록 입력", height=150, placeholder="여기에 입력하세요...")
+st.subheader("STEP 2. 화장품 목록 입력")
+st.caption("사용 중인 기초 화장품 이름을 한 줄에 하나씩 적어주세요.")
+products_input = st.text_area("제품명 입력 예시:\n이니스프리 레티놀 앰플\n에스트라 아토베리어 크림", height=150)
 
-# 버튼
+# --- [STEP 3] 분석 버튼 및 결과 ---
 if st.button("내 루틴 진단하기 🔍", type="primary"):
     if not products_input:
-        st.error("화장품 목록을 입력해주세요!")
+        st.error("화장품 목록을 먼저 입력해주세요.")
     else:
-        # 분석 시작
-        routine, status, advice_text = analyze_l_basi(products_input, selected_level)
+        # 1. 상태 판정 실행
+        status = calculate_status(total_score, is_procedure)
+        advice = get_advice_text(status)
+        
+        # 2. 제품 분류 실행
+        routine = classify_products(products_input)
 
+        # 3. 결과 화면 출력
         st.divider()
         st.header("📊 L-BASI 분석 결과")
+        st.caption(f"진단 점수: {total_score}점 / 판정: {status}")
 
-        # 1. 진단 결과 메시지 (색상 구분)
+        # 진단 메시지 박스
         if status == "Normal":
-            st.success(advice_text)
+            st.success(advice)
         elif status == "Caution":
-            st.info(advice_text)
+            st.info(advice)
         elif status == "Warning":
-            st.warning(advice_text)
+            st.warning(advice)
         elif status == "Danger":
-            st.error(advice_text)
-        elif status == "Medical":
-            st.error(advice_text)
+            st.error(advice)
 
-        # 2. 제품 재배치 시각화
-        st.subheader("🧴 당신의 화장품 재배치")
+        # 루틴 재설계 시각화
+        st.subheader("🧴 당신의 화장품 재배치 (Routine Map)")
         
         col1, col2, col3 = st.columns(3)
 
-        # 3단계 이상(Warning~)부터는 Trigger 사용 금지 표시!
-        stop_trigger = selected_level >= 3 
+        # Trigger 중단 여부 결정 (Warning 단계 이상이면 중단)
+        stop_trigger = (status == "Warning" or status == "Danger")
 
         with col1:
-            st.markdown("**1. Primer (환경조성)**")
+            st.markdown("### 1. Primer\n*(환경 조성)*")
             if routine["Primer"]:
                 for p in routine["Primer"]:
                     st.success(f"Op: {p}")
             else:
-                st.caption("없음")
+                st.caption("제품 없음")
 
         with col2:
-            st.markdown("**2. Trigger (기능활성)**")
+            st.markdown("### 2. Trigger\n*(기능 활성)*")
             if routine["Trigger"]:
                 for p in routine["Trigger"]:
                     if stop_trigger:
-                        # 3단계 이상이면 빨간색 취소선
+                        # 위험 단계면 빨간색 취소선
                         st.error(f"⛔ ~~{p}~~ (중단)")
-                    elif selected_level == 2:
-                        # 2단계면 주의 표시
+                    elif status == "Caution":
+                        # 주의 단계면 노란색 경고
                         st.warning(f"⚠️ {p} (양 줄이기)")
                     else:
-                        # 1단계면 정상
+                        # 정상 단계면 번개 아이콘
                         st.warning(f"⚡ {p}")
             else:
-                st.caption("없음")
+                st.caption("제품 없음")
 
         with col3:
-            st.markdown("**3. Stabilizer (안정화)**")
+            st.markdown("### 3. Stabilizer\n*(안정/유지)*")
             if routine["Stabilizer"]:
                 for p in routine["Stabilizer"]:
                     st.info(f"🛡️ {p}")
             else:
-                st.caption("없음")
+                st.caption("제품 없음")
 
+        # 미분류 제품 표시
         if routine["Unknown"]:
-            st.caption(f"※ 분류 불가: {', '.join(routine['Unknown'])}")
+            st.caption(f"※ 분류되지 않은 제품: {', '.join(routine['Unknown'])}")
+            
+        st.divider()
+        st.caption("Disclaimer: 본 결과는 AI 알고리즘 기반의 가이드이며 의학적 진단을 대체할 수 없습니다.")
