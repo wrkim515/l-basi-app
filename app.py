@@ -2,75 +2,49 @@ import streamlit as st
 import re
 
 # ==========================================
-# 0. 안전 장치 (에러 방지)
-# ==========================================
-try:
-    import easyocr
-    import numpy as np
-    from PIL import Image
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
-except Exception as e:
-    OCR_AVAILABLE = False
-
-# ==========================================
-# 1. 핵심 로직 (AI 두뇌)
+# 1. 핵심 로직 (L-BASI 엔진)
 # ==========================================
 
-# OCR 리더기 로딩 (안전 장치 적용)
-@st.cache_resource
-def load_ocr_reader():
-    if OCR_AVAILABLE:
-        return easyocr.Reader(['ko', 'en'], gpu=False)
-    return None
-
-def extract_text_from_image(image_file):
-    """이미지에서 글자를 읽어오는 함수"""
-    if not OCR_AVAILABLE:
-        return "OCR 기능 사용 불가"
-    
-    try:
-        reader = load_ocr_reader()
-        image = Image.open(image_file)
-        image_np = np.array(image)
-        result = reader.readtext(image_np, detail=0)
-        return "\n".join(result)
-    except Exception as e:
-        return f"사진 읽기 실패: {e}"
-
-def classify_products(products_text):
-    """입력된 모든 텍스트를 분석하여 분류"""
-    triggers_keywords = ["레티놀", "비타민C", "아하", "바하", "AHA", "BHA", "필링", "스크럽", "미백", "주름", "고기능", "애시드", "L-AA", "엔자임", "박피", "살리실릭", "글라이콜릭"]
-    primers_keywords = ["토너", "스킨", "로션", "세라마이드", "장벽", "보습", "수분", "히알루론산", "크림", "에센스", "부스터", "프라이머", "글리세린", "베타인", "판테놀"]
-    stabilizers_keywords = ["시카", "진정", "재생", "마데카", "리페어", "오일", "밤", "병풀", "알로에", "쑥", "어성초", "알란토인", "캄"]
+def classify_products(text_data):
+    """
+    제품명과 전성분 텍스트를 통합 분석하여 분류
+    """
+    # 키워드 데이터베이스 (지속적 업데이트 필요)
+    triggers_keywords = ["레티놀", "비타민C", "아스코빅", "아하", "바하", "AHA", "BHA", "살리실릭", "글라이콜릭", "락틱", "필링", "스크럽", "미백", "주름", "고기능", "애시드", "L-AA", "엔자임", "박피", "나이아신아마이드"]
+    primers_keywords = ["토너", "스킨", "로션", "세라마이드", "장벽", "보습", "수분", "히알루론산", "소듐하이알루로네이트", "크림", "에센스", "부스터", "프라이머", "글리세린", "베타인", "판테놀", "콜레스테롤", "지방산"]
+    stabilizers_keywords = ["시카", "진정", "재생", "마데카", "리페어", "오일", "밤", "병풀", "알로에", "쑥", "어성초", "알란토인", "캄", "카모마일", "녹차"]
 
     my_routine = {"Primer": [], "Trigger": [], "Stabilizer": [], "Unknown": []}
     
-    clean_text = products_text.replace(",", "\n")
-    product_list = [p.strip() for p in clean_text.split('\n') if p.strip()]
-
-    for product in product_list:
+    # 텍스트가 비어있지 않은 경우에만 분석
+    if text_data:
         classified = False
+        # 1순위: Trigger (자극 성분 우선 감지)
         for key in triggers_keywords:
-            if key in product:
-                my_routine["Trigger"].append(product)
+            if key in text_data:
+                my_routine["Trigger"].append(text_data) # 전체 텍스트를 해당 카테고리에 넣음
                 classified = True
                 break
+        
+        # 2순위: Stabilizer
         if not classified:
             for key in stabilizers_keywords:
-                if key in product:
-                    my_routine["Stabilizer"].append(product)
+                if key in text_data:
+                    my_routine["Stabilizer"].append(text_data)
                     classified = True
                     break
+        
+        # 3순위: Primer
         if not classified:
             for key in primers_keywords:
-                if key in product:
-                    my_routine["Primer"].append(product)
+                if key in text_data:
+                    my_routine["Primer"].append(text_data)
                     classified = True
                     break
+        
+        # 미분류
         if not classified:
-            my_routine["Unknown"].append(product)
+            my_routine["Unknown"].append(text_data)
             
     return my_routine
 
@@ -119,11 +93,8 @@ def extract_score(text):
 st.set_page_config(page_title="L-BASI Skin OS", page_icon="🧬")
 
 st.title("🧬 L-BASI™ Skin OS")
-st.markdown("### 피부 상태 기반 화장품 루틴 설계 시스템")
-
-# 에러 발생 시 안내 메시지
-if not OCR_AVAILABLE:
-    st.warning("⚠️ 현재 '사진 읽기' 기능이 서버 문제로 잠시 중단되었습니다. **'직접 입력'** 기능을 이용해주세요.")
+st.markdown("### 정밀 성분 분석 기반 루틴 가이드")
+st.info("💡 **전성분**을 직접 넣어주시면, 병원급 정밀도로 분석해 드립니다.")
 
 st.divider()
 
@@ -141,47 +112,59 @@ with st.expander("📋 진단 설문지 열기 (클릭)", expanded=True):
 
 total_score = sum([extract_score(q) for q in [q1, q2, q3, q4, q5, q6]])
 
-# --- [STEP 2] 화장품 입력 ---
+# --- [STEP 2] 화장품 입력 (세트 입력 방식) ---
 st.divider()
-st.subheader("STEP 2. 화장품 등록")
-st.caption("제품명이나 전성분표, 둘 중 하나만 있어도 됩니다.")
+st.subheader("STEP 2. 화장품 등록 (정밀 분석)")
+st.caption("사용 중인 제품을 하나씩 등록해주세요.")
 
-col_input1, col_input2 = st.columns(2)
+# 세션 스테이트를 사용해 입력된 제품 목록 저장
+if 'product_list' not in st.session_state:
+    st.session_state.product_list = []
 
-with col_input1:
-    st.markdown("**✍️ 1. 제품명/성분 직접 입력**")
-    manual_text = st.text_area("텍스트 입력", height=150, placeholder="예: 레티놀 앰플, 정제수, 글리세린...")
+with st.form("product_form", clear_on_submit=True):
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        p_name = st.text_input("제품명 (별명)", placeholder="예: 이니스프리 레티놀")
+    with col2:
+        p_ingredients = st.text_area("전성분 붙여넣기", placeholder="인터넷에서 전성분을 복사해서 여기에 붙여넣으세요.", height=100)
+    
+    submitted = st.form_submit_button("제품 추가하기 ➕")
+    
+    if submitted and p_name:
+        # 제품명과 전성분을 합쳐서 저장
+        combined_text = f"{p_name} | {p_ingredients}"
+        st.session_state.product_list.append(combined_text)
+        st.success(f"'{p_name}' 추가됨!")
 
-ocr_text = ""
-with col_input2:
-    st.markdown("**📷 2. 전성분표 사진 업로드**")
-    if OCR_AVAILABLE:
-        uploaded_file = st.file_uploader("사진 올리기", type=['png', 'jpg', 'jpeg'])
-        if uploaded_file is not None:
-            with st.spinner("AI가 글자를 읽는 중..."):
-                ocr_text = extract_text_from_image(uploaded_file)
-                if "실패" in ocr_text:
-                    st.error("사진을 읽을 수 없습니다.")
-                else:
-                    st.success("사진 읽기 성공!")
-                    with st.expander("읽은 내용 확인"):
-                        st.text(ocr_text)
-    else:
-        st.info("현재 사진 업로드 불가")
-
-# 두 입력값 합치기
-final_input = manual_text + "\n" + ocr_text
+# 등록된 제품 목록 보여주기
+if st.session_state.product_list:
+    st.markdown("##### 🛒 분석 대기 중인 제품 목록")
+    for idx, p in enumerate(st.session_state.product_list):
+        st.text(f"{idx+1}. {p.split('|')[0]}") # 제품명만 보여줌
+        
+    if st.button("목록 초기화 🗑️"):
+        st.session_state.product_list = []
+        st.rerun()
 
 # --- [STEP 3] 결과 출력 ---
+st.divider()
 if st.button("내 루틴 진단하기 🔍", type="primary"):
-    if not final_input.strip():
-        st.error("제품명을 적거나 사진을 올려주세요! (최소 한 가지 필요)")
+    if not st.session_state.product_list:
+        st.error("위에서 제품을 최소 1개 이상 추가해주세요!")
     else:
         status = calculate_status(total_score, q7)
         advice = get_advice_text(status)
-        routine = classify_products(final_input)
+        
+        # 저장된 모든 제품 분석
+        final_routine = {"Primer": [], "Trigger": [], "Stabilizer": [], "Unknown": []}
+        
+        for item_text in st.session_state.product_list:
+            # 개별 제품 분석 결과 가져오기
+            result = classify_products(item_text)
+            # 결과 합치기
+            for key in result:
+                final_routine[key].extend(result[key])
 
-        st.divider()
         st.header("📊 L-BASI 분석 결과")
         
         # 상태 메시지
@@ -197,26 +180,25 @@ if st.button("내 루틴 진단하기 🔍", type="primary"):
 
         with c1:
             st.markdown("### 1. Primer")
-            if routine["Primer"]:
-                for p in routine["Primer"]: st.success(p)
-            else: st.caption("없음")
+            for p in final_routine["Primer"]:
+                name = p.split('|')[0]
+                st.success(name)
         
         with c2:
             st.markdown("### 2. Trigger")
-            if routine["Trigger"]:
-                for p in routine["Trigger"]:
-                    if stop_trigger: st.error(f"⛔ ~~{p}~~")
-                    elif status == "Caution": st.warning(f"⚠️ {p}")
-                    else: st.warning(f"⚡ {p}")
-            else: st.caption("없음")
+            for p in final_routine["Trigger"]:
+                name = p.split('|')[0]
+                if stop_trigger: st.error(f"⛔ ~~{name}~~")
+                elif status == "Caution": st.warning(f"⚠️ {name}")
+                else: st.warning(f"⚡ {name}")
             
         with c3:
             st.markdown("### 3. Stabilizer")
-            if routine["Stabilizer"]:
-                for p in routine["Stabilizer"]: st.info(p)
-            else: st.caption("없음")
+            for p in final_routine["Stabilizer"]:
+                name = p.split('|')[0]
+                st.info(name)
 
-        # 미분류 정보
-        if routine["Unknown"]:
-            with st.expander("분류되지 않은 텍스트 보기"):
-                st.caption(", ".join(routine['Unknown']))
+        if final_routine["Unknown"]:
+            with st.expander("분류되지 않은 제품 보기"):
+                for p in final_routine["Unknown"]:
+                    st.caption(p.split('|')[0])
