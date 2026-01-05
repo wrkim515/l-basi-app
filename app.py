@@ -1,62 +1,74 @@
 import streamlit as st
-import easyocr
-import numpy as np
-from PIL import Image
 import re
+
+# ==========================================
+# 0. 안전 장치 (에러 방지)
+# ==========================================
+try:
+    import easyocr
+    import numpy as np
+    from PIL import Image
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+except Exception as e:
+    OCR_AVAILABLE = False
 
 # ==========================================
 # 1. 핵심 로직 (AI 두뇌)
 # ==========================================
 
-# OCR 리더기 (한 번만 로딩)
+# OCR 리더기 로딩 (안전 장치 적용)
 @st.cache_resource
 def load_ocr_reader():
-    return easyocr.Reader(['ko', 'en'], gpu=False)
+    if OCR_AVAILABLE:
+        return easyocr.Reader(['ko', 'en'], gpu=False)
+    return None
 
 def extract_text_from_image(image_file):
     """이미지에서 글자를 읽어오는 함수"""
-    reader = load_ocr_reader()
-    image = Image.open(image_file)
-    image_np = np.array(image)
-    result = reader.readtext(image_np, detail=0)
-    return "\n".join(result)
+    if not OCR_AVAILABLE:
+        return "OCR 기능 사용 불가"
+    
+    try:
+        reader = load_ocr_reader()
+        image = Image.open(image_file)
+        image_np = np.array(image)
+        result = reader.readtext(image_np, detail=0)
+        return "\n".join(result)
+    except Exception as e:
+        return f"사진 읽기 실패: {e}"
 
 def classify_products(products_text):
     """입력된 모든 텍스트를 분석하여 분류"""
-    # 키워드 DB
     triggers_keywords = ["레티놀", "비타민C", "아하", "바하", "AHA", "BHA", "필링", "스크럽", "미백", "주름", "고기능", "애시드", "L-AA", "엔자임", "박피", "살리실릭", "글라이콜릭"]
     primers_keywords = ["토너", "스킨", "로션", "세라마이드", "장벽", "보습", "수분", "히알루론산", "크림", "에센스", "부스터", "프라이머", "글리세린", "베타인", "판테놀"]
     stabilizers_keywords = ["시카", "진정", "재생", "마데카", "리페어", "오일", "밤", "병풀", "알로에", "쑥", "어성초", "알란토인", "캄"]
 
     my_routine = {"Primer": [], "Trigger": [], "Stabilizer": [], "Unknown": []}
     
-    # 텍스트 정리 (쉼표나 줄바꿈으로 구분된 것들을 리스트로 만듦)
     clean_text = products_text.replace(",", "\n")
     product_list = [p.strip() for p in clean_text.split('\n') if p.strip()]
 
     for product in product_list:
         classified = False
-        # 1순위 Trigger
         for key in triggers_keywords:
             if key in product:
                 my_routine["Trigger"].append(product)
                 classified = True
                 break
-        # 2순위 Stabilizer
         if not classified:
             for key in stabilizers_keywords:
                 if key in product:
                     my_routine["Stabilizer"].append(product)
                     classified = True
                     break
-        # 3순위 Primer
         if not classified:
             for key in primers_keywords:
                 if key in product:
                     my_routine["Primer"].append(product)
                     classified = True
                     break
-        # 미분류
         if not classified:
             my_routine["Unknown"].append(product)
             
@@ -108,7 +120,10 @@ st.set_page_config(page_title="L-BASI Skin OS", page_icon="🧬")
 
 st.title("🧬 L-BASI™ Skin OS")
 st.markdown("### 피부 상태 기반 화장품 루틴 설계 시스템")
-st.info("💡 **제품명**을 적거나 **성분표 사진**을 올려주세요. 정보가 많을수록 정확해집니다!")
+
+# 에러 발생 시 안내 메시지
+if not OCR_AVAILABLE:
+    st.warning("⚠️ 현재 '사진 읽기' 기능이 서버 문제로 잠시 중단되었습니다. **'직접 입력'** 기능을 이용해주세요.")
 
 st.divider()
 
@@ -126,10 +141,10 @@ with st.expander("📋 진단 설문지 열기 (클릭)", expanded=True):
 
 total_score = sum([extract_score(q) for q in [q1, q2, q3, q4, q5, q6]])
 
-# --- [STEP 2] 화장품 입력 (통합형) ---
+# --- [STEP 2] 화장품 입력 ---
 st.divider()
 st.subheader("STEP 2. 화장품 등록")
-st.caption("제품명이나 전성분표, 둘 중 하나만 있어도 됩니다. (둘 다 하면 더 좋아요!)")
+st.caption("제품명이나 전성분표, 둘 중 하나만 있어도 됩니다.")
 
 col_input1, col_input2 = st.columns(2)
 
@@ -137,19 +152,22 @@ with col_input1:
     st.markdown("**✍️ 1. 제품명/성분 직접 입력**")
     manual_text = st.text_area("텍스트 입력", height=150, placeholder="예: 레티놀 앰플, 정제수, 글리세린...")
 
+ocr_text = ""
 with col_input2:
     st.markdown("**📷 2. 전성분표 사진 업로드**")
-    uploaded_file = st.file_uploader("사진 올리기", type=['png', 'jpg', 'jpeg'])
-    ocr_text = ""
-    if uploaded_file is not None:
-        with st.spinner("AI가 글자를 읽는 중..."):
-            try:
+    if OCR_AVAILABLE:
+        uploaded_file = st.file_uploader("사진 올리기", type=['png', 'jpg', 'jpeg'])
+        if uploaded_file is not None:
+            with st.spinner("AI가 글자를 읽는 중..."):
                 ocr_text = extract_text_from_image(uploaded_file)
-                st.success("사진 읽기 성공!")
-                with st.expander("읽은 내용 확인"):
-                    st.text(ocr_text)
-            except:
-                st.error("사진을 읽을 수 없습니다.")
+                if "실패" in ocr_text:
+                    st.error("사진을 읽을 수 없습니다.")
+                else:
+                    st.success("사진 읽기 성공!")
+                    with st.expander("읽은 내용 확인"):
+                        st.text(ocr_text)
+    else:
+        st.info("현재 사진 업로드 불가")
 
 # 두 입력값 합치기
 final_input = manual_text + "\n" + ocr_text
